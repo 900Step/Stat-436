@@ -1,0 +1,135 @@
+---
+title: "Untitled"
+author: "Baiheng Chen"
+date: "2023/4/8"
+output: html_document
+---
+
+
+## Read in the data
+This is a classical dataset about Breast cancer from Kaggle. https://www.kaggle.com/datasets/uciml/breast-cancer-wisconsin-data
+In some pervious reasearch, some machine learning methods are used to do the binary classification. The dataset here contains 10 dimensions clincal features
+
+```{r}
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(tidymodels)
+library(patchwork)
+library(embed)
+
+url <- "https://raw.githubusercontent.com/900Step/Stat-436/main/cancer.csv"
+
+cancer <- read_csv(url)
+pca_result <- prcomp(cancer[,3:12], center = TRUE, scale. = TRUE)
+pca_summary <- summary(pca_result)
+
+pca_summary 
+
+```
+
+
+```{r}
+
+diagnosis = cancer[,c(1,2)]
+pca_recipe <- recipe(~., data = cancer) %>%
+  update_role(id, diagnosis, new_role = "id") %>%
+  step_normalize(all_predictors()) %>%
+  step_pca(all_predictors())
+
+pca_recipe
+pca_prep <- prep(pca_recipe)
+```
+
+
+
+```{r}
+
+pca_result <- tidy(pca_prep, 2)
+pca_result %>% filter(component %in% str_c("PC", 1:5))
+
+ggplot(pca_result %>% filter(component %in% str_c("PC", 1:5))) +
+  geom_col(aes(x = value, y = terms)) +
+  facet_wrap(~ component) +
+  labs(x = "Component", y = "Features")
+
+pca_scores <- bake(pca_prep, cancer)
+```
+
+```{r}
+ggplot(pca_scores)+
+  geom_point(aes(x = PC1, y = PC2, color = diagnosis))
+
+
+group_order <- pca_scores %>%
+  group_by(diagnosis) %>%
+  summarise(mpc2 = mean(PC2)) %>%
+  arrange(mpc2)
+
+group_order
+```
+```{r}
+library(plotly)
+
+# Create a 3D scatter plot
+fig <- plot_ly(x = pca_scores$PC1, y = pca_scores$PC2, z = pca_scores$PC3, type = "scatter3d", mode = "markers", color = pca_scores$diagnosis)
+fig
+
+```
+
+
+# UMAP
+
+
+```{r}
+# create a shiny app for the n_neighbor
+
+
+umap_rec <- recipe(~., data = cancer) %>%
+  update_role(id, diagnosis, new_role = "id") %>%
+  step_umap(all_predictors(), learn_rate = 0.1, neighbors = 20)
+umap_prep <- prep(umap_rec)
+umap_prep 
+embeddings <- bake(umap_prep, new_data = cancer) %>%
+  left_join(cancer)
+ggplot(embeddings) +
+  geom_point(aes(UMAP1, UMAP2, group = diagnosis, col = diagnosis), alpha = 0.4) +
+  scale_color_brewer(palette = "Set2")
+
+```
+
+```{r}
+library(shiny)
+
+ui<-fluidPage(
+  titlePanel("The UMAP plot of the breast cance dataset"),
+  numericInput("input_n", "n_neighbors: ", value = 50, min = 5, max = 200),
+  plotOutput("umap")
+)
+
+
+server <- function(input, output){
+  
+  umap_prep <- reactive({
+    recipe(~., data = cancer) %>%
+    update_role(id, diagnosis, new_role = "id") %>%
+    step_umap(all_predictors(), learn_rate = 0.1, neighbors = input$input_n)%>%
+    prep()
+    
+  })
+  umap_embeddings <- reactive({
+    bake(umap_prep(), new_data = cancer) %>%
+    left_join(cancer)
+    
+  })
+  
+  output$umap <- renderPlot({
+    ggplot(umap_embeddings())+
+  geom_point(aes(UMAP1, UMAP2, group = diagnosis, col = diagnosis), alpha = 0.4) +
+  scale_color_brewer(palette = "Set2")
+  })
+}
+
+# shinyApp(ui, server)
+```
